@@ -4,6 +4,7 @@
  * CLI entry point for nool.
  *
  * Reads text from stdin, extracts facts, writes JSON to stdout.
+ * Progress is written to stderr so it doesn't break piped JSON output.
  *
  * Usage:
  *   cat article.txt | nool
@@ -40,6 +41,12 @@ function checkApiKey(provider) {
   return true;
 }
 
+function onProgress(completed, total) {
+  if (total <= 1) return;
+  process.stderr.write(`\rProcessing batch ${completed}/${total}...`);
+  if (completed === total) process.stderr.write('\n');
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const text = await readStdin();
@@ -57,13 +64,13 @@ async function main() {
   }
 
   try {
-    const options = { provider: args.provider };
+    const options = { provider: args.provider, onProgress };
     if (args.model) options.model = args.model;
 
     const result = await extractFacts(text, options);
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } catch (err) {
-    process.stderr.write(`Error: ${err.message}\n`);
+    process.stderr.write(`\nError: ${err.message}\n`);
     process.exitCode = 1;
   }
 }
