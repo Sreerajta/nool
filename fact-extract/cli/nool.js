@@ -4,25 +4,39 @@
  * CLI entry point for nool.
  *
  * Reads text from stdin, extracts facts, writes JSON to stdout.
- * Progress is written to stderr so it doesn't break piped JSON output.
+ * Progress and logs are written to stderr.
  *
  * Usage:
  *   cat article.txt | nool
  *   cat article.txt | nool --provider anthropic
- *   cat article.txt | nool --provider openai --model gpt-4o
+ *   cat article.txt | nool --verbose
+ *   cat article.txt | nool --quiet
+ *   cat article.txt | nool --max-chars 50000
  */
 
 import { readStdin } from '../src/stdin.js';
 import { extractFacts } from '../src/extractFacts.js';
 
 function parseArgs(argv) {
-  const args = { provider: 'openai', model: undefined };
+  const args = {
+    provider: 'openai',
+    model: undefined,
+    verbose: false,
+    quiet: false,
+    maxChars: undefined,
+  };
 
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--provider' && argv[i + 1]) {
       args.provider = argv[++i];
     } else if (argv[i] === '--model' && argv[i + 1]) {
       args.model = argv[++i];
+    } else if (argv[i] === '--verbose') {
+      args.verbose = true;
+    } else if (argv[i] === '--quiet') {
+      args.quiet = true;
+    } else if (argv[i] === '--max-chars' && argv[i + 1]) {
+      args.maxChars = parseInt(argv[++i], 10);
     }
   }
 
@@ -41,16 +55,27 @@ function checkApiKey(provider) {
   return true;
 }
 
-function onProgress(completed, total) {
-  if (total <= 1) return;
-  process.stderr.write(`Processing batch ${completed}/${total}...\n`);
+function createLogger(args) {
+  const log = (msg) => {
+    if (!args.quiet) process.stderr.write(`${msg}\n`);
+  };
+  const verbose = (msg) => {
+    if (args.verbose && !args.quiet) process.stderr.write(`  ${msg}\n`);
+  };
+  const progress = (completed, total) => {
+    if (!args.quiet && total > 1) {
+      process.stderr.write(`Processing batch ${completed}/${total}...\n`);
+    }
+  };
+  return { log, verbose, progress };
 }
 
 async function main() {
   const args = parseArgs(process.argv);
+  const { log, verbose, progress } = createLogger(args);
 
   if (!process.stdin.isTTY) {
-    process.stderr.write('Reading input...\n');
+    log('Reading input...');
   }
 
   const text = await readStdin();
@@ -67,20 +92,46 @@ async function main() {
     return;
   }
 
-  try {
-    const inputLen = text.trim().length;
-    process.stderr.write(`Input: ${inputLen} characters. Extracting facts (${args.provider})...\n`);
+  // Truncate if --max-chars is set
+  let input = text.trim();
+  if (args.maxChars && input.length > args.maxChars) {
+    log(`Input truncated: ${input.length} → ${args.maxChars} characters`);
+    input = input.slice(0, args.maxChars);
+  }
 
-    const options = { provider: args.provider, onProgress };
+  log(`Input: ${input.length} characters. Extracting facts (${args.provider})...`);
+
+  // Graceful shutdown: Ctrl+C outputs partial results
+  const ac = new AbortController();
+  let result = null;
+
+  process.on('SIGINT', () => {
+    if (ac.signal.aborted) {
+      // Second Ctrl+C — force exit
+      process.exit(1);
+    }
+    log('\nInterrupted — finishing current batches and outputting partial results...');
+    ac.abort();
+  });
+
+  try {
+    const options = {
+      provider: args.provider,
+      onProgress: progress,
+      onLog: args.verbose ? verbose : null,
+      signal: ac.signal,
+    };
     if (args.model) options.model = args.model;
 
-    const result = await extractFacts(text, options);
-    process.stderr.write(`Done. ${result.facts.length} facts extracted.\n`);
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    result = await extractFacts(input, options);
+    log(`Done. ${result.facts.length} facts extracted.`);
   } catch (err) {
     process.stderr.write(`\nError: ${err.message}\n`);
     process.exitCode = 1;
+    return;
   }
+
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
 
 main();

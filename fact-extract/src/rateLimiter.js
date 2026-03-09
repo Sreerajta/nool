@@ -1,8 +1,11 @@
 /**
  * rateLimiter.js
  *
- * Token-bucket rate limiter for API calls.
+ * Queue-based rate limiter for API calls.
  * Enforces a maximum number of requests per minute.
+ *
+ * Each call reserves a time slot synchronously before awaiting,
+ * so concurrent workers get sequential slots — no race conditions.
  *
  * Usage:
  *   const limiter = createRateLimiter(60)
@@ -11,16 +14,18 @@
 
 export function createRateLimiter(maxPerMinute = 60) {
   const interval = 60_000 / maxPerMinute;
-  let lastCall = 0;
+  let nextSlot = 0;
 
   return async function limit() {
     const now = Date.now();
-    const elapsed = now - lastCall;
 
-    if (elapsed < interval) {
-      await new Promise(resolve => setTimeout(resolve, interval - elapsed));
+    // Reserve the next slot synchronously (before any await).
+    // This is what prevents the race condition with concurrent workers.
+    const wait = Math.max(0, nextSlot - now);
+    nextSlot = Math.max(now, nextSlot) + interval;
+
+    if (wait > 0) {
+      await new Promise(resolve => setTimeout(resolve, wait));
     }
-
-    lastCall = Date.now();
   };
 }

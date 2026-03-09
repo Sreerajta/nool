@@ -114,6 +114,13 @@ Do not modify `extractFacts.js`. Instead, create a wrapper that calls `extractFa
 ### Adding a new pipeline stage
 Insert it as a clear step in `extractFacts.js`. Name the step with a comment. Keep the step-by-step structure.
 
+## Resilience and Rate Limiting
+
+- **Rate limiter** (`rateLimiter.js`) uses queue-based slot reservation. Each call reserves its slot synchronously before any `await`, so concurrent workers get sequential slots with no race condition.
+- **Retry** (`retry.js`) handles 429, 5xx, and 529 errors with exponential backoff. Respects `Retry-After` headers. Non-retryable errors (auth, bad request) fail immediately.
+- **Graceful shutdown**: The orchestrator accepts an `AbortSignal`. When aborted, workers finish their current batch but don't start new ones. Partial results are returned.
+- **Logging**: The orchestrator accepts an `onLog` callback for verbose pipeline stats. The CLI exposes this via `--verbose` and suppresses all output via `--quiet`.
+
 ## Refactoring Guidelines
 
 When modifying code:

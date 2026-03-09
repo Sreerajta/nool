@@ -118,7 +118,18 @@ cat paper.txt | nool | jq '.facts[] | .text'
 
 # Top 5 by confidence
 cat paper.txt | nool | jq '[.facts | sort_by(-.confidence) | .[:5]]'
+
+# Verbose — see pipeline stats, batch timing, token counts
+cat article.txt | nool --verbose
+
+# Quiet — no stderr output, just JSON
+cat article.txt | nool --quiet | jq
+
+# Limit input size (characters)
+curl -s example.com | html2text | nool --max-chars 50000
 ```
+
+Ctrl+C during extraction outputs partial results — facts already extracted are not lost.
 
 ## Scope and Boundaries
 
@@ -165,6 +176,9 @@ const result = await extractFacts(text, {
   maxFacts: 50,            // Maximum facts to return (default: Infinity)
   concurrency: 4,          // Parallel API calls (default: 3)
   rateLimit: 30,           // Max requests per minute (default: 60)
+  onProgress: (done, total) => {},  // Progress callback
+  onLog: (message) => {},           // Verbose logging callback
+  signal: abortController.signal,   // AbortSignal for graceful shutdown
 })
 ```
 

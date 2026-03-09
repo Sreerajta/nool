@@ -11,6 +11,9 @@
  *     → Deduplication
  *     → JSON Output
  *
+ * Supports graceful shutdown via AbortSignal — stops dispatching new batches
+ * and returns partial results collected so far.
+ *
  * This is the primary public API of the library.
  */
 
@@ -24,27 +27,22 @@ import { extract as extractWithAnthropic } from './llm/anthropic.js';
 
 const DEFAULTS = {
   provider: 'openai',
-  model: undefined, // each provider has its own default
+  model: undefined,
   maxFacts: Infinity,
   concurrency: 3,
   rateLimit: 60,
-  onProgress: null, // optional callback: (completed, total) => void
+  onProgress: null,
+  onLog: null,
+  signal: null,
 };
 
 // -- Helpers ----------------------------------------------------------
 
-/**
- * Return the extract function for the given provider name.
- */
 function getExtractor(provider) {
   if (provider === 'anthropic') return extractWithAnthropic;
   return extractWithOpenAI;
 }
 
-/**
- * Group sentences into batches of roughly maxLength characters.
- * Reduces the number of API calls for many short sentences.
- */
 function batchSentences(sentences, maxLength = 500) {
   const batches = [];
   let current = '';
@@ -61,15 +59,13 @@ function batchSentences(sentences, maxLength = 500) {
   return batches;
 }
 
-/**
- * Run async tasks with bounded concurrency.
- */
-async function runParallel(items, fn, concurrency) {
+async function runParallel(items, fn, concurrency, signal) {
   const results = [];
   let index = 0;
 
   async function worker() {
     while (index < items.length) {
+      if (signal?.aborted) break;
       const i = index++;
       results[i] = await fn(items[i], i);
     }
@@ -90,12 +86,14 @@ async function runParallel(items, fn, concurrency) {
  *
  * @param {string} text - Raw input text
  * @param {object} [options]
- * @param {string} [options.provider]    - LLM provider: "openai" or "anthropic" (default: "openai")
+ * @param {string} [options.provider]    - "openai" or "anthropic" (default: "openai")
  * @param {string} [options.model]       - Model name (default: provider-specific)
  * @param {number} [options.maxFacts]    - Max facts to return (default: Infinity)
  * @param {number} [options.concurrency] - Parallel API calls (default: 3)
  * @param {number} [options.rateLimit]   - Max requests per minute (default: 60)
- * @param {function} [options.onProgress] - Progress callback: (completed, total) => void
+ * @param {function} [options.onProgress] - (completed, total) => void
+ * @param {function} [options.onLog]      - (message) => void — verbose logging
+ * @param {AbortSignal} [options.signal]  - Abort signal for graceful shutdown
  * @returns {Promise<{facts: Array, errors?: Array}>}
  */
 export async function extractFacts(text, options = {}) {
@@ -104,14 +102,17 @@ export async function extractFacts(text, options = {}) {
   }
 
   const opts = { ...DEFAULTS, ...options };
+  const log = opts.onLog || (() => {});
   const llmExtract = getExtractor(opts.provider);
 
   // Step 1: Split text into sentences
   const sentences = splitSentences(text);
+  log(`Sentences: ${sentences.length}`);
   if (sentences.length === 0) return { facts: [] };
 
   // Step 2: Filter to sentences likely containing factual claims
   const claims = filterClaims(sentences);
+  log(`Claims after filtering: ${claims.length} (filtered out ${sentences.length - claims.length})`);
 
   // Fallback: if the claim filter rejects everything, try the full text
   if (claims.length === 0) {
@@ -125,6 +126,7 @@ export async function extractFacts(text, options = {}) {
   // Step 3: Batch claims for efficient API usage
   const batches = batchSentences(claims);
   const total = batches.length;
+  log(`Batches: ${total} (concurrency: ${opts.concurrency}, rate limit: ${opts.rateLimit}/min)`);
 
   // Step 4: Extract facts from each batch (parallel, rate-limited, with retry)
   const limiter = createRateLimiter(opts.rateLimit);
@@ -137,20 +139,23 @@ export async function extractFacts(text, options = {}) {
     batches,
     async (batch) => {
       await limiter();
+      const start = Date.now();
       try {
         const facts = await withRetry(
           () => llmExtract(batch, opts),
           {
             onRetry: (attempt, delay) => {
               const delaySec = (delay / 1000).toFixed(1);
-              errors.push({ batch: batch.slice(0, 80), error: `Rate limited, retry ${attempt} in ${delaySec}s` });
+              log(`Batch rate limited, retry ${attempt} in ${delaySec}s`);
             },
           },
         );
+        log(`Batch done in ${((Date.now() - start) / 1000).toFixed(1)}s — ${facts.length} facts`);
         // Step 5: Attach source sentence (grounding)
         return facts.map(f => ({ ...f, source_sentence: batch }));
       } catch (err) {
         errors.push({ batch: batch.slice(0, 80), error: err.message });
+        log(`Batch failed: ${err.message}`);
         return [];
       } finally {
         completed++;
@@ -158,12 +163,15 @@ export async function extractFacts(text, options = {}) {
       }
     },
     opts.concurrency,
+    opts.signal,
   );
 
   // Step 6: Flatten and deduplicate
   const allFacts = results.flat();
   const unique = dedupeFacts(allFacts);
   const limited = unique.slice(0, opts.maxFacts);
+
+  log(`Total: ${allFacts.length} raw → ${unique.length} unique → ${limited.length} returned`);
 
   const output = { facts: limited };
   if (errors.length > 0) output.errors = errors;

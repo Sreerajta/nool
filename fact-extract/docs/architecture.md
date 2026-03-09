@@ -112,5 +112,8 @@ extractFacts(text, options)
 - **Source grounding**: `source_sentence` is attached in the orchestrator, not by the LLM. This keeps grounding deterministic and accurate.
 - **Batching**: Short sentences are grouped into ~500-character batches to reduce API calls.
 - **Fallback**: If the claim filter rejects all sentences, the full text is sent as one chunk.
+- **Rate limiter**: Queue-based slot reservation. Each concurrent worker gets a sequential time slot assigned synchronously before any `await`, preventing the race condition found in simple `lastCall` approaches.
+- **Retry**: Exponential backoff (2s → 4s → 8s, max 30s) on 429/5xx/529. Respects `Retry-After` headers. Non-retryable errors fail immediately to avoid wasting time.
+- **Graceful shutdown**: `AbortSignal` support. Workers finish their current batch but skip remaining ones. Partial results are returned rather than lost.
 - **Rate limiting**: Simple token-bucket approach. Sufficient for single-user CLI usage.
 - **Concurrency**: Worker-pool pattern with configurable parallelism. Defaults to 3.

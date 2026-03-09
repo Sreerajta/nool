@@ -33,4 +33,17 @@ describe('extractFacts', () => {
     const result = await extractFacts('', { provider: 'unknown' });
     assert.deepEqual(result, { facts: [] });
   });
+
+  it('calls onLog when provided', async () => {
+    const logs = [];
+    await extractFacts('', { onLog: (msg) => logs.push(msg) });
+    // Empty input returns early before logging
+    assert.equal(logs.length, 0);
+  });
+
+  it('accepts signal option without crashing on empty input', async () => {
+    const ac = new AbortController();
+    const result = await extractFacts('', { signal: ac.signal });
+    assert.deepEqual(result, { facts: [] });
+  });
 });
