@@ -48,6 +48,11 @@ function onProgress(completed, total) {
 
 async function main() {
   const args = parseArgs(process.argv);
+
+  if (!process.stdin.isTTY) {
+    process.stderr.write('Reading input...\n');
+  }
+
   const text = await readStdin();
 
   if (!text.trim()) {
