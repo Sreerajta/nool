@@ -120,6 +120,25 @@ cat paper.txt | nool | jq '.facts[] | .text'
 cat paper.txt | nool | jq '[.facts | sort_by(-.confidence) | .[:5]]'
 ```
 
+## Scope and Boundaries
+
+Nool does **one thing**: extract facts from text. It does not scrape, clean, filter, or preprocess input. Feed it clean text and you get clean facts.
+
+If your input is a web page, clean it upstream:
+
+```bash
+# Bad — dumps navigation, footers, metadata into nool
+curl -s https://en.wikipedia.org/wiki/Octopus | html2text | nool
+
+# Better — limit to first 200 lines of article body
+curl -s https://en.wikipedia.org/wiki/Octopus | html2text | head -200 | nool
+
+# Best — use a proper content extractor upstream
+your-scraper --body-only https://example.com/article | nool
+```
+
+Nool will faithfully extract facts from whatever you send it — including "This page was last edited on 26 January 2026" if that's in the input. Garbage in, garbage out. Clean input is your responsibility; fact extraction is nool's.
+
 ## Library
 
 ```js
