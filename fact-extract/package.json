@@ -1,6 +1,6 @@
 {
   "name": "nool",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Pull the threads of knowledge from text. Extract atomic facts — CLI and JS library.",
   "type": "module",
   "main": "src/extractFacts.js",
@@ -16,9 +16,10 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["fact-extraction", "nlp", "openai", "cli", "pipeline", "nool"],
+  "keywords": ["fact-extraction", "nlp", "openai", "anthropic", "claude", "cli", "pipeline", "nool"],
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "openai": "^4.0.0"
   }
 }

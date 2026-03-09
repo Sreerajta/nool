@@ -15,18 +15,28 @@
 
 import { splitSentences } from './splitSentences.js';
 import { filterClaims } from './claimFilter.js';
-import { llmExtract } from './llmExtract.js';
 import { dedupeFacts } from './dedupeFacts.js';
 import { createRateLimiter } from './rateLimiter.js';
+import { extract as extractWithOpenAI } from './llm/openai.js';
+import { extract as extractWithAnthropic } from './llm/anthropic.js';
 
 const DEFAULTS = {
-  model: 'gpt-4o-mini',
+  provider: 'openai',
+  model: undefined, // each provider has its own default
   maxFacts: Infinity,
   concurrency: 3,
   rateLimit: 60,
 };
 
 // -- Helpers ----------------------------------------------------------
+
+/**
+ * Return the extract function for the given provider name.
+ */
+function getExtractor(provider) {
+  if (provider === 'anthropic') return extractWithAnthropic;
+  return extractWithOpenAI;
+}
 
 /**
  * Group sentences into batches of roughly maxLength characters.
@@ -77,7 +87,8 @@ async function runParallel(items, fn, concurrency) {
  *
  * @param {string} text - Raw input text
  * @param {object} [options]
- * @param {string} [options.model]       - OpenAI model (default: gpt-4o-mini)
+ * @param {string} [options.provider]    - LLM provider: "openai" or "anthropic" (default: "openai")
+ * @param {string} [options.model]       - Model name (default: provider-specific)
  * @param {number} [options.maxFacts]    - Max facts to return (default: Infinity)
  * @param {number} [options.concurrency] - Parallel API calls (default: 3)
  * @param {number} [options.rateLimit]   - Max requests per minute (default: 60)
@@ -89,6 +100,7 @@ export async function extractFacts(text, options = {}) {
   }
 
   const opts = { ...DEFAULTS, ...options };
+  const llmExtract = getExtractor(opts.provider);
 
   // Step 1: Split text into sentences
   const sentences = splitSentences(text);

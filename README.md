@@ -60,7 +60,7 @@ Sentence Splitting     Break text into sentences
 Claim Filtering        Keep only sentences likely containing facts
   │
   ▼
-LLM Extraction         Extract structured facts via OpenAI
+LLM Extraction         Extract structured facts via OpenAI or Anthropic
   │
   ▼
 Deduplication          Remove duplicate facts, keep highest confidence
@@ -71,6 +71,13 @@ JSON Output            { facts: [...] }
 
 Claim filtering runs *before* the LLM, using lightweight heuristics (numbers, scientific verbs, entity names, measurements). This significantly reduces API calls and cost.
 
+## Supported Providers
+
+| Provider   | Models                         | API Key              |
+|------------|--------------------------------|----------------------|
+| OpenAI     | gpt-4o-mini, gpt-4o, etc.     | `OPENAI_API_KEY`     |
+| Anthropic  | claude-sonnet-4-20250514, etc.   | `ANTHROPIC_API_KEY`  |
+
 ## Installation
 
 ```bash
@@ -80,28 +87,31 @@ npm install nool
 ## Setup
 
 ```bash
+# For OpenAI (default)
 export OPENAI_API_KEY=sk-...
+
+# For Anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ## CLI
 
-Nool follows Unix philosophy — read stdin, write JSON to stdout, compose in pipelines.
-
 ```bash
-# From a file
+# OpenAI (default)
 cat article.txt | nool
 
-# From the web
-curl -s https://en.wikipedia.org/wiki/Octopus | html2text | nool
+# Anthropic
+cat article.txt | nool --provider anthropic
 
-# Just the fact text
+# Specific model
+cat article.txt | nool --provider openai --model gpt-4o
+cat article.txt | nool --provider anthropic --model claude-sonnet-4-20250514
+
+# Pipe with jq
 cat paper.txt | nool | jq '.facts[] | .text'
 
 # Top 5 by confidence
 cat paper.txt | nool | jq '[.facts | sort_by(-.confidence) | .[:5]]'
-
-# Compose with anything
-scraper | paragraph-filter | nool | jq
 ```
 
 ## Library
@@ -109,9 +119,14 @@ scraper | paragraph-filter | nool | jq
 ```js
 import { extractFacts } from 'nool'
 
-const result = await extractFacts(
-  'Octopuses have three hearts and blue blood due to hemocyanin.'
-)
+// OpenAI (default)
+const result = await extractFacts('Octopuses have three hearts.')
+
+// Anthropic
+const result = await extractFacts('Octopuses have three hearts.', {
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-20250514'
+})
 
 console.log(result.facts)
 ```
@@ -120,7 +135,8 @@ console.log(result.facts)
 
 ```js
 const result = await extractFacts(text, {
-  model: 'gpt-4o-mini',   // OpenAI model (default: gpt-4o-mini)
+  provider: 'openai',     // "openai" or "anthropic" (default: "openai")
+  model: 'gpt-4o-mini',   // Model name (default: provider-specific)
   maxFacts: 50,            // Maximum facts to return (default: Infinity)
   concurrency: 4,          // Parallel API calls (default: 3)
   rateLimit: 30,           // Max requests per minute (default: 60)
@@ -134,36 +150,21 @@ src/
   extractFacts.js     Pipeline orchestrator — the main entry point
   splitSentences.js   Text → sentence array
   claimFilter.js      Sentence array → likely factual claims
-  llmExtract.js       Text chunk → facts via OpenAI
   dedupeFacts.js      Remove duplicate facts
   rateLimiter.js      API rate control
   stdin.js            Read piped input
+
+  llm/
+    prompt.js         Shared system prompt
+    parse.js          Shared JSON response parsing
+    openai.js         OpenAI provider
+    anthropic.js      Anthropic provider
 
 cli/
   nool.js             CLI entry point
 ```
 
-Each file has one job. Files are named after their primary exported function. See [docs/architecture.md](fact-extract/docs/architecture.md) for the full design.
-
-## Examples
-
-```bash
-# Wikipedia → facts
-curl -s "https://en.wikipedia.org/wiki/Octopus" \
-  | html2text | nool | jq '.facts[] | .text'
-
-# Research paper → top 10 facts by confidence
-cat paper.txt | nool \
-  | jq '[.facts | sort_by(-.confidence) | .[:10] | .[] | {text, confidence}]'
-```
-
-```js
-// Curiosity cards
-import { extractFacts } from 'nool'
-
-const { facts } = await extractFacts('The Moon is drifting away from Earth at 3.8 cm per year.')
-facts.forEach(f => console.log(`[${f.confidence}] ${f.text}`))
-```
+Each file has one job. See [docs/architecture.md](fact-extract/docs/architecture.md) for the full design.
 
 ## Testing
 

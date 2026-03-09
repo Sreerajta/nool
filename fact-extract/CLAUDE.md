@@ -29,19 +29,25 @@ src/
   extractFacts.js    — Pipeline orchestrator (public API)
   splitSentences.js  — Text → sentences
   claimFilter.js     — Sentences → likely claims
-  llmExtract.js      — Text chunk → facts (OpenAI API)
   dedupeFacts.js     — Remove duplicate facts
   rateLimiter.js     — API rate control
   stdin.js           — Read piped input
 
+  llm/
+    prompt.js        — Shared system prompt (used by all providers)
+    parse.js         — Shared JSON response parsing
+    openai.js        — OpenAI provider
+    anthropic.js     — Anthropic (Claude) provider
+
 cli/
-  fact-extract.js    — CLI entry point
+  nool.js            — CLI entry point
 
 test/
   splitSentences.test.js
   claimFilter.test.js
   dedupeFacts.test.js
   extractFacts.test.js
+  parse.test.js
 ```
 
 Files are named after their primary exported function.
@@ -60,10 +66,36 @@ All modules operate on this structure:
 }
 ```
 
-## Extension Guidelines
+## LLM Provider Architecture
 
-### Adding a new extractor
-Create a new file in `src/` that exports an async function with signature `(text, options) → Fact[]`. Swap it into `extractFacts.js` in place of `llmExtract`.
+Each LLM provider lives in its own module under `src/llm/`. All providers:
+
+- Export an `extract(text, options)` function returning `Fact[]`
+- Use the shared prompt from `llm/prompt.js`
+- Use the shared parser from `llm/parse.js`
+
+The orchestrator (`extractFacts.js`) selects providers via a simple if/else in `getExtractor()`:
+
+```js
+function getExtractor(provider) {
+  if (provider === 'anthropic') return extractWithAnthropic;
+  return extractWithOpenAI;
+}
+```
+
+No abstract factories. No plugin registries. No dynamic imports.
+
+### Adding a new provider
+
+1. Create `src/llm/newprovider.js`
+2. Export `async function extract(text, options)` returning `Fact[]`
+3. Import shared prompt from `./prompt.js` and parser from `./parse.js`
+4. Add an import and an `if` branch in `extractFacts.js`'s `getExtractor()`
+5. Add `--provider newprovider` handling in `cli/nool.js`'s `checkApiKey()`
+
+Future providers to consider: Ollama, OpenRouter, local models.
+
+## Extension Guidelines
 
 ### Modifying claim filtering
 Edit the regex patterns and scoring logic in `claimFilter.js`. Add new patterns, adjust weights. The `isLikelyClaim` function uses additive scoring — keep that pattern.
@@ -83,18 +115,17 @@ When modifying code:
 - Do not introduce abstract base classes, factory patterns, or dependency injection.
 - Do not add runtime type-checking libraries. Use JSDoc for types.
 - Do not add configuration files (YAML, TOML). Options are passed as function arguments.
-- Keep the dependency count minimal. Currently only `openai`.
+- Keep the dependency count minimal. Currently: `openai`, `@anthropic-ai/sdk`.
 
 ## Testing
 
 - Use Node.js built-in test runner (`node:test`).
 - One test file per source module.
-- Test pure functions directly. Mock the OpenAI client for integration tests.
+- Test pure functions directly. Mock LLM clients for integration tests.
 - Run: `npm test`
 
 ## Commands
 
 ```bash
 npm test           # Run all tests
-npm run test       # Same
 ```

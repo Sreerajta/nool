@@ -19,8 +19,8 @@ Claim Filter       (claimFilter.js)
   │                 Heuristic check: does this sentence contain a factual claim?
   │                 Reduces LLM calls by filtering non-factual sentences.
   ▼
-LLM Extraction     (llmExtract.js)
-  │                 Sends text to OpenAI API with a strict extraction prompt.
+LLM Extraction     (llm/openai.js or llm/anthropic.js)
+  │                 Sends text to the selected LLM provider.
   │                 Runs in parallel batches with rate limiting.
   ▼
 Deduplication      (dedupeFacts.js)
@@ -34,13 +34,34 @@ JSON Output        { facts: [...] }
 
 | Module            | File                | Responsibility                          |
 |-------------------|---------------------|-----------------------------------------|
-| Pipeline          | `extractFacts.js`   | Orchestrates all stages                 |
+| Pipeline          | `extractFacts.js`   | Orchestrates all stages, selects provider |
 | Sentence Splitter | `splitSentences.js` | Text → sentence array                   |
 | Claim Filter      | `claimFilter.js`    | Sentence array → likely-claim array     |
-| LLM Extractor     | `llmExtract.js`     | Text chunk → Fact array (via OpenAI)    |
+| Shared Prompt     | `llm/prompt.js`     | System prompt used by all providers     |
+| Shared Parser     | `llm/parse.js`      | JSON response parsing for all providers |
+| OpenAI Provider   | `llm/openai.js`     | Text chunk → Fact array (via OpenAI)    |
+| Anthropic Provider| `llm/anthropic.js`  | Text chunk → Fact array (via Claude)    |
 | Deduplication     | `dedupeFacts.js`    | Fact array → unique Fact array          |
 | Rate Limiter      | `rateLimiter.js`    | Controls API request rate               |
 | Stdin Reader      | `stdin.js`          | Reads piped input for the CLI           |
+
+## LLM Provider Architecture
+
+```
+extractFacts.js
+  │
+  ├── getExtractor(provider)     simple if/else, returns extract function
+  │
+  ├── llm/openai.js              OpenAI: chat.completions.create
+  │     ├── llm/prompt.js        shared system prompt
+  │     └── llm/parse.js         shared JSON parser
+  │
+  └── llm/anthropic.js           Anthropic: messages.create
+        ├── llm/prompt.js        shared system prompt
+        └── llm/parse.js         shared JSON parser
+```
+
+Provider selection is a plain if/else — no registries, no dynamic dispatch.
 
 ## Fact Schema
 
@@ -61,26 +82,28 @@ Every extracted fact follows this structure:
 ```
 extractFacts(text, options)
   │
-  ├── splitSentences(text)        → string[]
-  ├── filterClaims(sentences)     → string[]
-  ├── batchSentences(claims)      → string[]     (internal helper)
-  ├── runParallel(batches, ...)   → Fact[][]     (internal helper)
-  │     └── llmExtract(batch)     → Fact[]       (per batch)
-  ├── results.flat()              → Fact[]
-  ├── dedupeFacts(allFacts)       → Fact[]
+  ├── getExtractor(provider)     → extract function
+  ├── splitSentences(text)       → string[]
+  ├── filterClaims(sentences)    → string[]
+  ├── batchSentences(claims)     → string[]     (internal helper)
+  ├── runParallel(batches, ...)  → Fact[][]     (internal helper)
+  │     └── extract(batch)       → Fact[]       (per batch, via selected provider)
+  ├── results.flat()             → Fact[]
+  ├── dedupeFacts(allFacts)      → Fact[]
   └── return { facts }
 ```
 
 ## Extension Points
 
-- **New extractors**: Replace `llmExtract.js` with any function matching `(text, options) → Fact[]`
+- **New providers**: Add a file in `src/llm/`, add an `if` branch in `getExtractor()`
 - **Custom claim filters**: Add rules to the scoring system in `claimFilter.js`
 - **Output formats**: Wrap `extractFacts()` and transform the result (CSV, JSONL, etc.)
-- **Different LLM providers**: Swap the OpenAI client in `llmExtract.js` for another provider
 
 ## Design Decisions
 
+- **Shared prompt**: All providers use the same system prompt from `llm/prompt.js` to ensure consistent extraction quality.
+- **Shared parser**: `llm/parse.js` handles JSON extraction robustly, including markdown fences and wrapped text — needed especially for Anthropic which has no `response_format` option.
 - **Batching**: Short sentences are grouped into ~500-character batches to reduce API calls.
-- **Fallback**: If the claim filter rejects all sentences, the full text is sent as one chunk. This prevents silent failures on unconventional input.
-- **Rate limiting**: A simple token-bucket approach. Sufficient for single-user CLI usage.
+- **Fallback**: If the claim filter rejects all sentences, the full text is sent as one chunk.
+- **Rate limiting**: Simple token-bucket approach. Sufficient for single-user CLI usage.
 - **Concurrency**: Worker-pool pattern with configurable parallelism. Defaults to 3.

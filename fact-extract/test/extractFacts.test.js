@@ -23,4 +23,14 @@ describe('extractFacts', () => {
     assert.ok(Object.hasOwn(result, 'facts'));
     assert.ok(Array.isArray(result.facts));
   });
+
+  it('accepts provider option without crashing on empty input', async () => {
+    const result = await extractFacts('', { provider: 'anthropic' });
+    assert.deepEqual(result, { facts: [] });
+  });
+
+  it('accepts unknown provider and falls back to openai on empty input', async () => {
+    const result = await extractFacts('', { provider: 'unknown' });
+    assert.deepEqual(result, { facts: [] });
+  });
 });
