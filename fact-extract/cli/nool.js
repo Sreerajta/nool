@@ -43,8 +43,7 @@ function checkApiKey(provider) {
 
 function onProgress(completed, total) {
   if (total <= 1) return;
-  process.stderr.write(`\rProcessing batch ${completed}/${total}...`);
-  if (completed === total) process.stderr.write('\n');
+  process.stderr.write(`Processing batch ${completed}/${total}...\n`);
 }
 
 async function main() {
@@ -64,10 +63,14 @@ async function main() {
   }
 
   try {
+    const inputLen = text.trim().length;
+    process.stderr.write(`Input: ${inputLen} characters. Extracting facts (${args.provider})...\n`);
+
     const options = { provider: args.provider, onProgress };
     if (args.model) options.model = args.model;
 
     const result = await extractFacts(text, options);
+    process.stderr.write(`Done. ${result.facts.length} facts extracted.\n`);
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } catch (err) {
     process.stderr.write(`\nError: ${err.message}\n`);
