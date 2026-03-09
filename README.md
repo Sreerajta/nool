@@ -2,11 +2,13 @@
 
 **നൂല്‍** — *thread* in Malayalam.
 
-Nool pulls the threads of knowledge from raw text. Give it prose, get back atomic facts — clean, structured, and ready to use.
+Pull threads of knowledge from raw text.
 
 ```
 cat article.txt | nool | jq '.facts[] | .text'
 ```
+
+> This project was built with LLMs. It is maintained with LLMs. The code is structured so that AI coding assistants (Claude, GPT, Copilot) can read, extend, and refactor it easily. There is a [CLAUDE.md](fact-extract/CLAUDE.md) that tells them how. If that bothers you, this isn't for you.
 
 ## What It Does
 
@@ -179,7 +181,7 @@ See [CONTRIBUTING.md](fact-extract/CONTRIBUTING.md).
 - Small modules, explicit data flow
 - Readable over clever
 - Minimal dependencies
-- Works with Unix pipes
+- Built with LLMs, maintained with LLMs
 
 ## License
 
