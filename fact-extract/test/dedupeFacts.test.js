@@ -44,4 +44,15 @@ describe('dedupeFacts', () => {
   it('handles empty array', () => {
     assert.deepEqual(dedupeFacts([]), []);
   });
+
+  it('preserves source_sentence of highest confidence fact', () => {
+    const facts = [
+      { text: 'The sky is blue', confidence: 0.7, source_sentence: 'The sky is blue and vast.' },
+      { text: 'The sky is blue', confidence: 0.9, source_sentence: 'The sky is blue on clear days.' },
+    ];
+    const result = dedupeFacts(facts);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].confidence, 0.9);
+    assert.equal(result[0].source_sentence, 'The sky is blue on clear days.');
+  });
 });

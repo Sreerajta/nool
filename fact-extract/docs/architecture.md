@@ -23,6 +23,10 @@ LLM Extraction     (llm/openai.js or llm/anthropic.js)
   │                 Sends text to the selected LLM provider.
   │                 Runs in parallel batches with rate limiting.
   ▼
+Source Grounding    (extractFacts.js — inline)
+  │                 Attaches source_sentence to each fact programmatically.
+  │                 Never relies on the LLM to produce source text.
+  ▼
 Deduplication      (dedupeFacts.js)
   │                 Normalizes fact text, removes duplicates,
   │                 keeps highest confidence score.
@@ -69,11 +73,12 @@ Every extracted fact follows this structure:
 
 ```js
 {
-  text: string,       // The atomic factual statement (max 20 words)
-  subject: string,    // The entity the fact is about
-  predicate: string,  // The verb or relationship
-  object: string,     // The value or related entity
-  confidence: number  // 0.0–1.0, how clearly stated in source
+  text: string,            // The atomic factual statement (max 20 words)
+  subject: string,         // The entity the fact is about
+  predicate: string,       // The verb or relationship
+  object: string,          // The value or related entity
+  confidence: number,      // 0.0–1.0, how clearly stated in source
+  source_sentence: string  // The original text this fact was extracted from
 }
 ```
 
@@ -87,7 +92,8 @@ extractFacts(text, options)
   ├── filterClaims(sentences)    → string[]
   ├── batchSentences(claims)     → string[]     (internal helper)
   ├── runParallel(batches, ...)  → Fact[][]     (internal helper)
-  │     └── extract(batch)       → Fact[]       (per batch, via selected provider)
+  │     ├── extract(batch)       → Fact[]       (per batch, via selected provider)
+  │     └── attach source_sentence to each fact  (grounding)
   ├── results.flat()             → Fact[]
   ├── dedupeFacts(allFacts)      → Fact[]
   └── return { facts }
@@ -103,6 +109,7 @@ extractFacts(text, options)
 
 - **Shared prompt**: All providers use the same system prompt from `llm/prompt.js` to ensure consistent extraction quality.
 - **Shared parser**: `llm/parse.js` handles JSON extraction robustly, including markdown fences and wrapped text — needed especially for Anthropic which has no `response_format` option.
+- **Source grounding**: `source_sentence` is attached in the orchestrator, not by the LLM. This keeps grounding deterministic and accurate.
 - **Batching**: Short sentences are grouped into ~500-character batches to reduce API calls.
 - **Fallback**: If the claim filter rejects all sentences, the full text is sent as one chunk.
 - **Rate limiting**: Simple token-bucket approach. Sufficient for single-user CLI usage.

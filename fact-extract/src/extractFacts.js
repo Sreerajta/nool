@@ -7,6 +7,7 @@
  *     → Sentence Splitting
  *     → Claim Filtering
  *     → LLM Fact Extraction (parallel, rate-limited)
+ *     → Source Grounding (attach source sentence)
  *     → Deduplication
  *     → JSON Output
  *
@@ -112,7 +113,8 @@ export async function extractFacts(text, options = {}) {
   // Fallback: if the claim filter rejects everything, try the full text
   if (claims.length === 0) {
     const facts = await llmExtract(text.trim(), opts);
-    return { facts: facts.slice(0, opts.maxFacts) };
+    const grounded = facts.map(f => ({ ...f, source_sentence: text.trim() }));
+    return { facts: grounded.slice(0, opts.maxFacts) };
   }
 
   // Step 3: Batch claims for efficient API usage
@@ -127,7 +129,9 @@ export async function extractFacts(text, options = {}) {
     async (batch) => {
       await limiter();
       try {
-        return await llmExtract(batch, opts);
+        const facts = await llmExtract(batch, opts);
+        // Step 5: Attach source sentence (grounding)
+        return facts.map(f => ({ ...f, source_sentence: batch }));
       } catch (err) {
         errors.push({ batch: batch.slice(0, 80), error: err.message });
         return [];
@@ -136,7 +140,7 @@ export async function extractFacts(text, options = {}) {
     opts.concurrency,
   );
 
-  // Step 5: Flatten and deduplicate
+  // Step 6: Flatten and deduplicate
   const allFacts = results.flat();
   const unique = dedupeFacts(allFacts);
   const limited = unique.slice(0, opts.maxFacts);
