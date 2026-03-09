@@ -176,6 +176,7 @@ const result = await extractFacts(text, {
   maxFacts: 50,            // Maximum facts to return (default: Infinity)
   concurrency: 4,          // Parallel API calls (default: 3)
   rateLimit: 30,           // Max requests per minute (default: 60)
+  requestTimeout: 30000,   // Per-request timeout in ms (default: 30000)
   onProgress: (done, total) => {},  // Progress callback
   onLog: (message) => {},           // Verbose logging callback
   signal: abortController.signal,   // AbortSignal for graceful shutdown

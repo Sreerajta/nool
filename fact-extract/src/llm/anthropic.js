@@ -14,8 +14,12 @@ import { SYSTEM_PROMPT, buildUserPrompt } from './prompt.js';
 import { parseFacts } from './parse.js';
 
 export async function extract(text, options = {}) {
-  const { model = 'claude-sonnet-4-20250514' } = options;
+  const { model = 'claude-sonnet-4-20250514', requestTimeout = 30_000 } = options;
   const client = new Anthropic();
+
+  const requestOptions = requestTimeout
+    ? { timeout: requestTimeout }
+    : {};
 
   const response = await client.messages.create({
     model,
@@ -24,7 +28,7 @@ export async function extract(text, options = {}) {
     messages: [
       { role: 'user', content: buildUserPrompt(text) },
     ],
-  });
+  }, requestOptions);
 
   const content = response.content[0]?.text;
   return parseFacts(content);

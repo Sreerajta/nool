@@ -31,6 +31,7 @@ const DEFAULTS = {
   maxFacts: Infinity,
   concurrency: 3,
   rateLimit: 60,
+  requestTimeout: 30_000,
   onProgress: null,
   onLog: null,
   signal: null,
@@ -59,13 +60,14 @@ function batchSentences(sentences, maxLength = 500) {
   return batches;
 }
 
-async function runParallel(items, fn, concurrency, signal) {
+async function runParallel(items, fn, concurrency, signal, circuitBreaker) {
   const results = [];
   let index = 0;
 
   async function worker() {
     while (index < items.length) {
       if (signal?.aborted) break;
+      if (circuitBreaker?.tripped) break;
       const i = index++;
       results[i] = await fn(items[i], i);
     }
@@ -76,7 +78,7 @@ async function runParallel(items, fn, concurrency, signal) {
     () => worker(),
   );
   await Promise.all(workers);
-  return results;
+  return results.filter(Boolean);
 }
 
 // -- Main Pipeline ----------------------------------------------------
@@ -90,10 +92,11 @@ async function runParallel(items, fn, concurrency, signal) {
  * @param {string} [options.model]       - Model name (default: provider-specific)
  * @param {number} [options.maxFacts]    - Max facts to return (default: Infinity)
  * @param {number} [options.concurrency] - Parallel API calls (default: 3)
- * @param {number} [options.rateLimit]   - Max requests per minute (default: 60)
- * @param {function} [options.onProgress] - (completed, total) => void
- * @param {function} [options.onLog]      - (message) => void — verbose logging
- * @param {AbortSignal} [options.signal]  - Abort signal for graceful shutdown
+ * @param {number} [options.rateLimit]      - Max requests per minute (default: 60)
+ * @param {number} [options.requestTimeout] - Per-request timeout in ms (default: 30000)
+ * @param {function} [options.onProgress]   - (completed, total) => void
+ * @param {function} [options.onLog]        - (message) => void — verbose logging
+ * @param {AbortSignal} [options.signal]    - Abort signal for graceful shutdown
  * @returns {Promise<{facts: Array, errors?: Array}>}
  */
 export async function extractFacts(text, options = {}) {
@@ -132,6 +135,7 @@ export async function extractFacts(text, options = {}) {
   const limiter = createRateLimiter(opts.rateLimit);
   const errors = [];
   let completed = 0;
+  const circuitBreaker = { tripped: false, consecutiveFailures: 0, maxFailures: 5 };
 
   if (opts.onProgress) opts.onProgress(0, total);
 
@@ -142,7 +146,7 @@ export async function extractFacts(text, options = {}) {
       const start = Date.now();
       try {
         const facts = await withRetry(
-          () => llmExtract(batch, opts),
+          () => llmExtract(batch, { ...opts, requestTimeout: opts.requestTimeout }),
           {
             onRetry: (attempt, delay) => {
               const delaySec = (delay / 1000).toFixed(1);
@@ -150,10 +154,16 @@ export async function extractFacts(text, options = {}) {
             },
           },
         );
+        circuitBreaker.consecutiveFailures = 0;
         log(`Batch done in ${((Date.now() - start) / 1000).toFixed(1)}s — ${facts.length} facts`);
         // Step 5: Attach source sentence (grounding)
         return facts.map(f => ({ ...f, source_sentence: batch }));
       } catch (err) {
+        circuitBreaker.consecutiveFailures++;
+        if (circuitBreaker.consecutiveFailures >= circuitBreaker.maxFailures) {
+          circuitBreaker.tripped = true;
+          log(`Circuit breaker tripped after ${circuitBreaker.maxFailures} consecutive failures — skipping remaining batches`);
+        }
         errors.push({ batch: batch.slice(0, 80), error: err.message });
         log(`Batch failed: ${err.message}`);
         return [];
@@ -164,6 +174,7 @@ export async function extractFacts(text, options = {}) {
     },
     opts.concurrency,
     opts.signal,
+    circuitBreaker,
   );
 
   // Step 6: Flatten and deduplicate

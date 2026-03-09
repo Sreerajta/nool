@@ -13,8 +13,12 @@ import { SYSTEM_PROMPT, buildUserPrompt } from './prompt.js';
 import { parseFacts } from './parse.js';
 
 export async function extract(text, options = {}) {
-  const { model = 'gpt-4o-mini' } = options;
+  const { model = 'gpt-4o-mini', requestTimeout = 30_000 } = options;
   const client = new OpenAI();
+
+  const fetchOptions = requestTimeout
+    ? { signal: AbortSignal.timeout(requestTimeout) }
+    : {};
 
   const response = await client.chat.completions.create({
     model,
@@ -24,7 +28,7 @@ export async function extract(text, options = {}) {
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: buildUserPrompt(text) },
     ],
-  });
+  }, fetchOptions);
 
   const content = response.choices[0]?.message?.content;
   return parseFacts(content);

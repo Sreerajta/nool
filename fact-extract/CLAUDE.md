@@ -118,7 +118,9 @@ Insert it as a clear step in `extractFacts.js`. Name the step with a comment. Ke
 
 - **Rate limiter** (`rateLimiter.js`) uses queue-based slot reservation. Each call reserves its slot synchronously before any `await`, so concurrent workers get sequential slots with no race condition.
 - **Retry** (`retry.js`) handles 429, 5xx, and 529 errors with exponential backoff. Respects `Retry-After` headers. Non-retryable errors (auth, bad request) fail immediately.
-- **Graceful shutdown**: The orchestrator accepts an `AbortSignal`. When aborted, workers finish their current batch but don't start new ones. Partial results are returned.
+- **Graceful shutdown**: The orchestrator accepts an `AbortSignal`. When aborted, workers finish their current batch but don't start new ones. Partial results are returned. Incomplete slots are filtered before dedup.
+- **Per-request timeout**: Each LLM call has a configurable timeout (default 30s) via `requestTimeout` option, passed through to provider SDKs.
+- **Circuit breaker**: After 5 consecutive batch failures, remaining batches are skipped. A single success resets the counter. Partial results are still returned.
 - **Logging**: The orchestrator accepts an `onLog` callback for verbose pipeline stats. The CLI exposes this via `--verbose` and suppresses all output via `--quiet`.
 
 ## Refactoring Guidelines
