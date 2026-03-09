@@ -1,4 +1,4 @@
-# nool
+# 🧵 nool
 
 **നൂല്‍** — *thread* in Malayalam.
 
